@@ -1,6 +1,9 @@
-# DPIA-lite — điền trong checkpoint 5
+# DPIA-lite — CP5
 
-1. Loại dữ liệu và phân loại:
-2. Mục đích xử lý và principal:
-3. Dữ liệu đi qua những run/tool nào, endpoint nào:
-4. Bằng chứng deny/allow và giới hạn của mock:
+1. **Dữ liệu và phân loại:** ticket trong `corpus/` là nội dung internal nhưng không tin cậy, có thể chứa chỉ thị attacker và PII. `data/customers.json` chứa hồ sơ khách giả (CCCD, điện thoại, tài khoản, email), xử lý như restricted. `related_tickets` là ánh xạ tin cậy trong fixture. Đây là dữ liệu synthetic, không thu thập dữ liệu người thật.
+
+2. **Ai và mục đích:** `support_l1` được tìm/tóm tắt ticket cho `summarize-tickets`, không được đọc hồ sơ khách. `dpo` được tìm ticket và đọc khách liên quan cho `support-reply`. `--as` chỉ chọn quyền giả lập từ `data/principals.json`. Policy kiểm purpose, giao scope principal/agent/parent và thời hạn UTC; mỗi yêu cầu có agent_id/run_id riêng, TTL mặc định 5 phút.
+
+3. **Luồng dữ liệu:** Run A xin quyền `search_docs`, đọc ticket, che PII trước mock LLM và trích số ticket từ tên file. Run B chỉ nhận tuple số ticket cùng context quyền do chương trình tạo; xin quyền trước khi mở private store, ánh xạ `related_tickets`, rồi xin quyền từng `read_customer`. Hồ sơ thô không được đưa vào bản tóm tắt; CLI chỉ thêm số hồ sơ đã đọc. Chỉ thị gửi dữ liệu được kiểm riêng với URL, classification restricted và egress enabled; policy deny nên không gọi `http_post`. Sink thử nghiệm chỉ nghe `127.0.0.1:10024`. Mỗi quyết định lưu hash tham số và metadata/reason trong `reports/ledger.jsonl`, không lưu hồ sơ thô.
+
+4. **Bằng chứng và giới hạn:** test PII/policy/OBO/split/injection/ledger kiểm cả allow và deny; `test_split.py` kiểm KH-000777 không được đọc từ chỉ thị trong text, khách liên quan vẫn được đọc. `reports/attack-before.log` giữ POST baseline có KH-000999 giả; lượt replay sau sửa phải đối chiếu `reports/attack-after.log`, deny dpo và kết quả verify trong `reports/verification.md`. Regex có thể bỏ sót dạng ngoài mẫu; mock LLM và fixture quyền không chứng minh hiệu quả production. Hash chain phát hiện sửa giữa chuỗi nhưng thiếu mốc ngoài file để phát hiện cắt đuôi/viết lại; chưa khóa ghi đa tiến trình, chính sách lưu/xoá và quản trị quyền thật. Báo cáo này phục vụ học tập, không phải hồ sơ đánh giá tác động pháp lý chính thức.

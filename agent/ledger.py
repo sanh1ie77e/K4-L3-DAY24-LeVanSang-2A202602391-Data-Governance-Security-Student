@@ -38,11 +38,48 @@ rồi gọi verify() phải trả về False.
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import json
+
+
+def _hash(entry: dict) -> str:
+    payload = {key: value for key, value in entry.items() if key != "hash"}
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def append(entry: dict, path: Path) -> dict:
-    raise NotImplementedError("BƯỚC 3d: implement ledger append")
+    path = Path(path)
+    previous = "0" * 64
+    if path.exists():
+        if not verify(path):
+            raise ValueError("Refusing to append to an invalid ledger")
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if lines:
+            previous = json.loads(lines[-1])["hash"]
+    result = dict(entry)
+    result["prev_hash"] = previous
+    result["hash"] = _hash(result)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(result, ensure_ascii=False, allow_nan=False) + "\n")
+    return result
 
 
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    previous = "0" * 64
+    try:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            entry = json.loads(line)
+            if not isinstance(entry, dict):
+                return False
+            reason = entry.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                return False
+            if entry.get("prev_hash") != previous or entry.get("hash") != _hash(entry):
+                return False
+            previous = entry["hash"]
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return False
+    return True

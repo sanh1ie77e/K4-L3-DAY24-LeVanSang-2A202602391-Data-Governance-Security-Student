@@ -1,10 +1,12 @@
-# Compliance mapping — điền trong checkpoint 5
+# Compliance mapping — CP5
 
 | Nguồn / yêu cầu | Control đã làm | Evidence file:dòng | Giới hạn |
 |---|---|---|---|
-| Luật 91/2025/QH15 | | | |
-| NĐ 356/2025/NĐ-CP | | | |
-| Luật AI 134/2025/QH15 | | | |
-| OWASP ASI01, ASI03, ASI04 | | | |
+| [Luật 91/2025/QH15 — Bảo vệ dữ liệu cá nhân](https://congbao.chinhphu.vn/van-ban/luat-so-91-2025-qh15-45578.htm); chủ đề đối chiếu: bảo vệ dữ liệu | Phát hiện/che PII trong ticket trước LLM; chặn egress dữ liệu restricted | `agent/pii.py:52`, `agent/pii.py:69`, `agent/runner.py:144`, `agent/policy.py:64` | Điều/khoản cụ thể: **chưa xác minh**. Regex và fixture không chứng minh căn cứ xử lý, sự đồng ý hoặc quyền của chủ thể dữ liệu. |
+| [NĐ 356/2025/NĐ-CP — hướng dẫn Luật Bảo vệ dữ liệu cá nhân](https://congbao.chinhphu.vn/van-ban/nghi-dinh-so-356-2025-nd-cp-468371.htm); chủ đề đối chiếu: ghi nhận hoạt động xử lý | Ledger ghi principal, mục đích qua policy, quyết định/reason; tham số chỉ lưu hash; DPIA-lite mô tả luồng học tập | `agent/runner.py:81`, `agent/runner.py:89`, `agent/ledger.py:70`, `reports/dpia-lite.md:1` | Điều/khoản cụ thể: **chưa xác minh**. Chưa xác định nghĩa vụ/hồ sơ pháp lý áp dụng; DPIA-lite không thay thế hồ sơ chính thức. |
+| [Luật AI 134/2025/QH15 — Trí tuệ nhân tạo](https://congbao.chinhphu.vn/van-ban/luat-so-134-2025-qh15-468694.htm); chủ đề đối chiếu: kiểm soát rủi ro agent | Tách Run A/B, kiểm quyền trước tool và lưu reason để giải thích quyết định | `agent/runner.py:105`, `agent/runner.py:125`, `agent/runner.py:149`, `agent/policy.py:59` | Điều/khoản cụ thể: **chưa xác minh**. Mock không đủ đánh giá rủi ro hệ thống AI thật, giám sát con người hoặc nghĩa vụ triển khai. |
+| [OWASP ASI01 — Agent Goal Hijack](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/) | Run B nhận số ticket lấy từ tên file; ánh xạ khách từ related_tickets tin cậy; deny egress | `agent/runner.py:105`, `agent/runner.py:115`, `agent/runner.py:158`, `tests/test_split.py:1` | Phụ thuộc tính tin cậy của tên file/store và đường gọi tool; 4 lure trong mock không bao phủ mọi injection. |
+| [OWASP ASI03 — Identity & Privilege Abuse](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/) | Giao quyền principal/agent/parent, kiểm purpose và TTL UTC, reason khi deny | `agent/policy.py:79`, `agent/policy.py:85`, `agent/policy.py:89`, `agent/policy.py:95`, `tests/test_obo.py:1` | `--as` chọn fixture, chưa xác thực người thật hoặc cấp/revoke delegation token. |
+| [OWASP ASI04 — Agentic Supply Chain Vulnerabilities](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/) | Pin/hash dependency, pin hook Gitleaks và quét secret ở history/current tree | `.pre-commit-config.yaml:1`, `requirements.lock:7`, `.gitleaks.toml:10`, `reports/secrets-incident.md:1` | Không có SBOM, kiểm CVE hay kiểm mã nguồn từng dependency. Hash không bảo đảm package an toàn. |
 
-Chỉ ghi điều khoản cụ thể khi đã đối chiếu văn bản gốc. Mô phỏng kỹ thuật không tự chứng minh tuân thủ pháp luật.
+Đã kiểm tên văn bản và nguồn Công báo chính thức ngày 12/10/2026; chưa đối chiếu toàn văn để gán điều/khoản nên bảng chỉ nêu chủ đề kỹ thuật cần xem xét. Đây không phải kết luận hoặc chứng nhận tuân thủ pháp luật.

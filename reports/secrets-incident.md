@@ -1,8 +1,13 @@
-# Secret giả trong lịch sử Git — điền trong checkpoint 4
+# Secret giả trong lịch sử Git — CP4
 
-- Scanner và phiên bản:
-- Commit chứa token giả:
-- File, rule và kết quả quét lịch sử:
-- Kết quả quét file hiện tại:
-- Nếu đây là credential thật, cần xử lý thế nào:
-- Vì sao xoá file khỏi HEAD hoặc pin dependency vẫn chưa đủ:
+Kiểm tra ngày 12/10/2026 trên Windows native, Python 3.13.15.
+
+- Scanner: Gitleaks 8.30.1, binary Windows x64 từ [release chính thức](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1), cài trong `.venv/Scripts/gitleaks.exe`. Archive có SHA-256 `d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e`, đã đối chiếu checksum release trước khi giải nén.
+- `gitleaks git --config .gitleaks.toml --redact .`: exit 1, quét 4 commit, tìm đúng 1 finding. Commit `1bdd849922156c868a5ee9293d68f5b72e242d2c`, file `lab-fake-secret.txt:1`, rule `lab24-synthetic-token`. Lượt chạy thêm `--verbose` xác nhận các metadata này; giá trị token được redact.
+- `gitleaks dir --config .gitleaks.toml --redact .`: lần đầu exit 0, `no leaks found`. Sau khi pre-commit tải repo scanner vào cache `.venv/.cache/pre-commit/`, lượt quét đủ quyền đọc cache tìm 415 finding, tất cả trong `.venv/`, gồm mã tạo mẫu kiểm rule như `cmd/generate/config/rules/anthropic.go` có phần validate / API key example. Đây là fixture/mẫu của scanner, không phải credential của bài. Đã thêm allowlist chỉ khớp thư mục `.venv/` trong `.gitleaks.toml`, giữ rule synthetic và default rules. Quét lại: history vẫn 1 finding (exit 1), dir sạch (exit 0). Scanner cảnh báo không đọc được `.pytest_cache` và `.pytest_tmp`; đây là cache/temp test, không coi các thư mục đó là đã quét.
+- Đã sinh lại `requirements.lock` bằng `python -m piptools compile --generate-hashes -o requirements.lock requirements.txt`, rồi chạy `python -m pip install --require-hashes -r requirements.lock`: cả hai exit 0. Các package đã có trong venv nên pip báo `Requirement already satisfied`; đây chưa phải bằng chứng cài lại trên môi trường trống. Hash/pin không tự chứng minh package không có mã độc.
+- `.pre-commit-config.yaml` dùng repo chính thức, `rev: v8.30.1`, `gitleaks-system`, `pass_filenames: false`. `pre-commit install` thành công; `pre-commit run --all-files` báo `Passed`. Gitleaks cần nằm trên PATH (kích hoạt `.venv` trước khi commit). Hook upstream quét staged changes; kết quả hook này không thay thế quét lịch sử và quét thư mục riêng, đặc biệt với file chưa stage.
+
+Nếu là credential thật: thu hồi/revoke token ở dịch vụ cấp ngay, rotate credential và cập nhật bên sử dụng; điều tra audit log để tìm việc dùng sai và phạm vi ảnh hưởng; tìm bản sao trong Git, CI log, artifact, fork và bản clone rồi xử lý theo quy trình sự cố. Giữ bằng chứng cần thiết và không chép secret vào báo cáo.
+
+Xoá file ở HEAD không xoá token khỏi commit cũ hoặc các bản sao. Pin dependency và hash chỉ kiểm soát đầu vào cài đặt; chúng không thu hồi quyền của token tại dịch vụ cấp. Token trong bài là synthetic và vô hiệu, không dùng để đăng nhập dịch vụ nào.

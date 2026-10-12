@@ -30,10 +30,44 @@ set ở tests/vn_pii_testset.jsonl):
 """
 from __future__ import annotations
 
+import re
+
+
+# Nhãn tài khoản giúp phân biệt STK 12 số với CCCD 12 số.
+# Chỉ lấy span của nhóm value, không che luôn nhãn STK.
+_BANK = re.compile(
+    r"\b(?:STK|số\s+tài\s+khoản|so\s+tai\s+khoan|bank_account)\b"
+    r"[ \t]*(?::|=)?[ \t]*(?P<value>[0-9]{8,16})(?!\w)",
+    re.IGNORECASE,
+)
+_PATTERNS = (
+    ("EMAIL", re.compile(r"(?<![\w.+-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
+                         r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+                         r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+")),
+    ("VN_CCCD", re.compile(r"(?<!\w)[0-9]{12}(?!\w)")),
+    ("VN_PHONE", re.compile(r"(?<!\w)0(?:[ \t-]?[0-9]){9,10}(?!\w)")),
+)
+
 
 def detect(text: str) -> list[dict]:
-    raise NotImplementedError("BƯỚC 3a: implement PII detection")
+    candidates = []
+    for match in _BANK.finditer(text):
+        candidates.append((0, "VN_BANK_ACCOUNT", *match.span("value")))
+    for priority, (entity_type, pattern) in enumerate(_PATTERNS, 1):
+        for match in pattern.finditer(text):
+            candidates.append((priority, entity_type, *match.span()))
+
+    # Ưu tiên nhãn STK, email, CCCD rồi điện thoại; mỗi vùng chỉ giữ một loại.
+    entities = []
+    for _, entity_type, start, end in sorted(candidates):
+        if any(start < item["end"] and item["start"] < end for item in entities):
+            continue
+        entities.append({"type": entity_type, "start": start, "end": end})
+    return sorted(entities, key=lambda item: item["start"])
 
 
 def redact(text: str) -> str:
-    raise NotImplementedError("BƯỚC 3a: implement PII redaction")
+    for entity in reversed(detect(text)):
+        start, end = entity["start"], entity["end"]
+        text = text[:start] + f"[REDACTED_{entity['type']}]" + text[end:]
+    return text

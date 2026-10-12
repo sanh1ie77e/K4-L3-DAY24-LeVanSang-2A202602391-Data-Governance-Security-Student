@@ -60,6 +60,15 @@ Interface bắt buộc (agent/loop.py import và gọi hàm này nếu tồn t�
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import re
+from uuid import uuid4
+
+from agent import ledger, pii, policy, tools
+from agent.policy import PolicyContext
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 DEFAULT_LEDGER_PATH = REPORTS_DIR / "ledger.jsonl"
@@ -69,6 +78,91 @@ class RunnerScaffoldPending(NotImplementedError):
     """Only the original 3c stub uses this to enable the CP1/CP2 baseline."""
 
 
+def _authorize(context: PolicyContext, arguments: dict, path: Path,
+               run_id: str, operation: str = "tool-call") -> bool:
+    allow, reason = policy.check(context)
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("Policy decision must have a non-empty reason")
+    args_hash = hashlib.sha256(
+        json.dumps(arguments, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    ledger.append({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "agent_id": context.agent_owner,
+        "run_id": run_id,
+        "on_behalf_of": context.principal_id,
+        "expires_at": context.expires_at,
+        "tool": context.requested_tool,
+        "args_hash": args_hash,
+        "classification": context.data_classification,
+        "decision": "allow" if allow else "deny",
+        "reason": reason,
+        "operation": operation,
+    }, path)
+    return allow
+
+
+def _run_b(ticket_ids: tuple[int, ...], context: PolicyContext,
+           ledger_path: Path, run_id: str) -> int:
+    # Kiểm quyền TRƯỚC cả việc mở store để tìm related_tickets.
+    if not _authorize(context, {"ticket_ids": ticket_ids}, ledger_path,
+                      run_id, operation="resolve-related-tickets"):
+        return 0
+    customers = json.loads(tools.CUSTOMERS_FILE.read_text(encoding="utf-8"))
+    wanted = set(ticket_ids)
+    customer_ids = dict.fromkeys(
+        row["customer_id"] for row in customers
+        if wanted.intersection(row.get("related_tickets", []))
+    )
+    read_count = 0
+    for customer_id in customer_ids:
+        if _authorize(context, {"customer_id": customer_id}, ledger_path, run_id):
+            tools.read_customer(customer_id)
+            read_count += 1
+    return read_count
+
+
 def handle(message: str, llm, log_dir: Path | None = None,
            principal_id: str = "support_l1") -> str:
-    raise RunnerScaffoldPending("BƯỚC 3c: implement trifecta split")
+    path = Path(log_dir) / "ledger.jsonl" if log_dir is not None else DEFAULT_LEDGER_PATH
+    agent_id = f"lab24-agent-{uuid4().hex}"
+    run_a, run_b = uuid4().hex, uuid4().hex
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    # Hai run là con của coordinator, không phải Run B kế thừa quyền từ Run A.
+    coordinator_scopes = ("search_docs", "read_customer", "http_post")
+    context_a = PolicyContext(
+        data_classification="internal", request_purpose="summarize-tickets",
+        agent_owner=agent_id, delegation_depth=1, egress_enabled=False,
+        principal_id=principal_id, requested_tool="search_docs",
+        agent_scopes=("search_docs",), parent_scopes=coordinator_scopes,
+        expires_at=expires_at,
+    )
+    if not _authorize(context_a, {"query": message}, path, run_a):
+        return "Yêu cầu tìm ticket bị từ chối; xem reason trong ledger."
+
+    docs = tools.search_docs(message)
+    safe_docs = [{"id": doc["id"], "text": pii.redact(doc["text"])} for doc in docs]
+    injected = llm.find_injection("\n\n".join(doc["text"] for doc in safe_docs))
+    if injected is not None:
+        # Yêu cầu egress từ tài liệu được đánh giá và ghi deny ngay trong Run A.
+        # URL/ID từ free text không được dùng để chọn khách hoặc truyền sang B.
+        egress_context = replace(context_a, data_classification="restricted",
+                                 requested_tool="http_post", egress_enabled=True)
+        if _authorize(egress_context,
+                      {"url": injected.target_url},
+                      path, run_a, operation="untrusted-egress-request"):
+            raise RuntimeError("Run A does not support egress")
+
+    ticket_ids = set()
+    for doc in docs:
+        match = re.fullmatch(r"ticket-([0-9]+)(?:b)?\.md", doc["id"])
+        if match:
+            ticket_ids.add(int(match.group(1)))
+    context_b = replace(context_a, data_classification="restricted",
+                        request_purpose="support-reply", requested_tool="read_customer",
+                        agent_scopes=("read_customer",))
+    read_count = _run_b(tuple(sorted(ticket_ids)), context_b, path, run_b)
+    answer = pii.redact(llm.summarize(safe_docs))
+    if read_count:
+        answer += f" Đã xử lý {read_count} hồ sơ liên quan theo quyền được cấp."
+    return answer
